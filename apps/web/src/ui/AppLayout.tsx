@@ -3,11 +3,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 
 const nav = [
-  { to: '/', label: 'Dashboard' },
-  { to: '/suppliers', label: 'Suppliers' },
-  { to: '/templates', label: 'Templates' },
-  { to: '/invoices', label: 'Invoices' },
-  { to: '/settings', label: 'Settings' },
+  { to: '/', label: 'Дашборд' },
+  { to: '/suppliers', label: 'Постачальники' },
+  { to: '/templates', label: 'Шаблони' },
+  { to: '/invoices', label: 'Інвойси' },
+  { to: '/settings', label: 'Налаштування' },
 ];
 
 export function AppLayout() {
@@ -48,11 +48,11 @@ export function AppLayout() {
         <header className="flex items-center justify-between">
           <div>
             <div className="text-lg font-semibold tracking-tight">Invoice Template Engine</div>
-            <div className="text-xs text-slate-400">Admin panel</div>
+            <div className="text-xs text-slate-400">Адмін-панель</div>
           </div>
           <div className="flex items-center gap-3">
             {offline ? (
-              <div className="text-xs text-amber-200/90">Offline mode (no Supabase)</div>
+              <div className="text-xs text-amber-200/90">Офлайн-режим (без Supabase)</div>
             ) : email ? (
               <div className="text-xs text-slate-300">{email}</div>
             ) : null}
@@ -64,7 +64,7 @@ export function AppLayout() {
               }}
               disabled={offline}
             >
-              Sign out
+              Вийти
             </button>
           </div>
         </header>
