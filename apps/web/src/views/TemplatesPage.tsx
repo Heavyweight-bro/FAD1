@@ -4,18 +4,22 @@ import { useOfflineStore } from '../offline/offlineStore';
 import { SAMPLE_1C_DATA } from '../offline/sample-data';
 import { transform1cData } from '../offline/transform';
 import type { FieldCategory, FieldMapping } from '../offline/types';
+import { apiFetch } from '../lib/api';
+import { supabase } from '../lib/supabase';
+import { pdfFirstPageToPngBase64 } from '../lib/pdf';
 
 const CATEGORIES: Array<{ id: FieldCategory; label: string }> = [
-  { id: 'buyer', label: 'Buyer' },
-  { id: 'seller', label: 'Seller' },
-  { id: 'bank', label: 'Bank' },
-  { id: 'document', label: 'Document' },
-  { id: 'delivery', label: 'Delivery' },
-  { id: 'shipper', label: 'Shipper' },
-  { id: 'items', label: 'Items' },
+  { id: 'buyer', label: 'Покупець' },
+  { id: 'seller', label: 'Постачальник' },
+  { id: 'bank', label: 'Банк' },
+  { id: 'document', label: 'Документ' },
+  { id: 'delivery', label: 'Доставка' },
+  { id: 'shipper', label: 'Відправник' },
+  { id: 'items', label: 'Товари' },
 ];
 
 export function TemplatesPage() {
+  const online = supabase != null;
   const suppliers = useOfflineStore((s) => s.suppliers);
   const templates = useOfflineStore((s) => s.templates);
   const selectedTemplateId = useOfflineStore((s) => s.selectedTemplateId);
@@ -35,6 +39,9 @@ export function TemplatesPage() {
   const [testJson, setTestJson] = useState(() => JSON.stringify(SAMPLE_1C_DATA, null, 2));
   const [renderError, setRenderError] = useState<string | null>(null);
   const [renderedHtml, setRenderedHtml] = useState<string>('');
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiNote, setAiNote] = useState<string>('');
 
   const supplierName = useMemo(() => {
     if (!selected) return '';
@@ -45,6 +52,34 @@ export function TemplatesPage() {
     if (!selected) return;
     const url = URL.createObjectURL(file);
     updateTemplateOriginalPdf(selected.id, { name: file.name, url });
+  }
+
+  async function generateFromPdf(file: File) {
+    if (!selected) return;
+    if (!online) {
+      setAiError('AI генерація доступна в онлайн-режимі (Supabase + Edge Function).');
+      return;
+    }
+    setAiError(null);
+    setAiNote('');
+    setAiBusy(true);
+    try {
+      const { base64, mimeType } = await pdfFirstPageToPngBase64(file);
+      const res = await apiFetch<{ success: true; html_template: string; note?: string }>(`/api/generate-template`, {
+        method: 'POST',
+        body: JSON.stringify({
+          supplier_id: selected.supplier_id,
+          image_base64: base64,
+          mime_type: mimeType,
+        }),
+      });
+      updateTemplate(selected.id, { html_template: res.html_template });
+      setAiNote(res.note ?? 'Шаблон згенеровано. Перевір і відредагуй перед збереженням.');
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : 'AI generation failed');
+    } finally {
+      setAiBusy(false);
+    }
   }
 
   function onImportHtml(file: File) {
@@ -94,9 +129,12 @@ export function TemplatesPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="text-base font-semibold">Templates (offline sandbox)</div>
+          <div className="text-base font-semibold">Шаблони</div>
           <div className="mt-1 text-sm text-slate-300">
-            Supplier: <span className="text-slate-100">{supplierName}</span>
+            Постачальник: <span className="text-slate-100">{supplierName}</span>
+          </div>
+          <div className="mt-1 text-xs text-slate-400">
+            Режим: {online ? 'онлайн (Supabase)' : 'офлайн (локальний sandbox)'}
           </div>
         </div>
 
@@ -116,14 +154,14 @@ export function TemplatesPage() {
             className="rounded-lg bg-slate-800 px-3 py-2 text-sm font-medium hover:bg-slate-700"
             onClick={() => createTemplateForSupplier(selected.supplier_id)}
           >
-            New template
+            Новий шаблон
           </button>
         </div>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-12">
         <section className="lg:col-span-4 rounded-2xl border border-slate-800 bg-slate-950/30 p-4">
-          <div className="text-sm font-semibold">1) Upload original PDF (manual)</div>
+          <div className="text-sm font-semibold">1) Завантаж оригінальний PDF</div>
           <div className="mt-2 flex items-center gap-2">
             <input
               type="file"
@@ -135,20 +173,45 @@ export function TemplatesPage() {
               className="block w-full text-xs text-slate-300 file:mr-3 file:rounded-lg file:border file:border-slate-700 file:bg-slate-900 file:px-3 file:py-2 file:text-xs file:text-slate-100 hover:file:bg-slate-800"
             />
           </div>
+          <div className="mt-2 flex gap-2">
+            <button
+              className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold hover:bg-indigo-500 disabled:opacity-60"
+              disabled={!selected.original_pdf_url || aiBusy}
+              onClick={async () => {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = 'application/pdf';
+                input.onchange = () => {
+                  const f = input.files?.[0];
+                  if (f) void generateFromPdf(f);
+                };
+                input.click();
+              }}
+              title={online ? 'Згенерувати HTML через Gemini' : 'Потрібен онлайн режим'}
+            >
+              {aiBusy ? 'Генерую…' : 'AI: згенерувати HTML'}
+            </button>
+          </div>
+          {aiError ? (
+            <div className="mt-3 rounded-lg border border-rose-900/60 bg-rose-950/30 px-3 py-2 text-xs text-rose-200">
+              {aiError}
+            </div>
+          ) : null}
+          {aiNote ? <div className="mt-3 text-xs text-emerald-200/90">{aiNote}</div> : null}
           {selected.original_pdf_name && selected.original_pdf_url ? (
             <div className="mt-3">
-              <div className="text-xs text-slate-400">Loaded: {selected.original_pdf_name}</div>
+              <div className="text-xs text-slate-400">Завантажено: {selected.original_pdf_name}</div>
               <div className="mt-2 aspect-[3/4] overflow-hidden rounded-xl border border-slate-800 bg-black/20">
                 <iframe title="original-pdf" src={selected.original_pdf_url} className="h-full w-full" />
               </div>
             </div>
           ) : (
             <div className="mt-3 text-xs text-slate-400">
-              Завантаж PDF, щоб уявно пройти “Flow 1” зі SPEC. Це локально, файл нікуди не відправляється.
+              Завантаж PDF, щоб пройти флоу. В офлайн-режимі PDF не аналізується; в онлайн-режимі AI бере першу сторінку як зображення.
             </div>
           )}
 
-          <div className="mt-6 text-sm font-semibold">2) Import / edit HTML template</div>
+          <div className="mt-6 text-sm font-semibold">2) Імпорт / редагування HTML</div>
           <div className="mt-2 flex items-center gap-2">
             <input
               type="file"
@@ -161,7 +224,7 @@ export function TemplatesPage() {
             />
           </div>
           <label className="mt-3 block text-xs text-slate-300">
-            Name
+            Назва
             <input
               className="mt-1 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-slate-600"
               value={selected.name}
@@ -172,12 +235,12 @@ export function TemplatesPage() {
 
         <section className="lg:col-span-8 rounded-2xl border border-slate-800 bg-slate-950/30 p-4">
           <div className="flex items-center justify-between gap-3">
-            <div className="text-sm font-semibold">Template HTML</div>
+            <div className="text-sm font-semibold">HTML шаблон</div>
             <button
               className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold hover:bg-indigo-500"
               onClick={renderPreview}
             >
-              Render preview
+              Згенерувати превʼю
             </button>
           </div>
 
@@ -202,7 +265,7 @@ export function TemplatesPage() {
                   />
                 ) : (
                   <div className="p-3 text-xs text-slate-700">
-                    Натисни <b>Render preview</b>, щоб побачити результат.
+                    Натисни <b>Згенерувати превʼю</b>, щоб побачити результат.
                   </div>
                 )}
               </div>
@@ -211,7 +274,7 @@ export function TemplatesPage() {
 
           <div className="mt-4 grid gap-3 lg:grid-cols-2">
             <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
-              <div className="text-xs font-semibold text-slate-100">Test JSON (1C-like)</div>
+              <div className="text-xs font-semibold text-slate-100">Тестові дані (JSON з 1C)</div>
               <textarea
                 value={testJson}
                 onChange={(e) => setTestJson(e.target.value)}
@@ -221,12 +284,12 @@ export function TemplatesPage() {
 
             <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
               <div className="flex items-center justify-between gap-3">
-                <div className="text-xs font-semibold text-slate-100">Field mappings</div>
+                <div className="text-xs font-semibold text-slate-100">Мапінг полів</div>
                 <button
                   className="rounded-lg bg-slate-800 px-2.5 py-1.5 text-[11px] font-semibold hover:bg-slate-700"
                   onClick={() => resetMappings(selected.id)}
                 >
-                  Reset defaults
+                  Скинути
                 </button>
               </div>
 
