@@ -1,5 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
-import { requireEnv } from './env';
+import { getEnv } from './env';
 
-export const supabase = createClient(requireEnv('VITE_SUPABASE_URL'), requireEnv('VITE_SUPABASE_ANON_KEY'));
+const url = getEnv('VITE_SUPABASE_URL');
+const anon = getEnv('VITE_SUPABASE_ANON_KEY');
+
+export const supabase = url && anon ? createClient(url, anon) : null;
 

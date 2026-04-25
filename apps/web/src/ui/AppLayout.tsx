@@ -13,15 +13,17 @@ const nav = [
 export function AppLayout() {
   const navigate = useNavigate();
   const [email, setEmail] = useState<string | null>(null);
+  const offline = supabase == null;
 
   useEffect(() => {
+    if (offline) return;
     let mounted = true;
-    supabase.auth.getUser().then(({ data }) => {
+    supabase!.auth.getUser().then(({ data }) => {
       if (!mounted) return;
       if (!data.user) navigate('/login');
       setEmail(data.user?.email ?? null);
     });
-    const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
+    const { data: sub } = supabase!.auth.onAuthStateChange((_evt, session) => {
       if (!session) navigate('/login');
       setEmail(session?.user?.email ?? null);
     });
@@ -29,7 +31,7 @@ export function AppLayout() {
       mounted = false;
       sub.subscription.unsubscribe();
     };
-  }, [navigate]);
+  }, [navigate, offline]);
 
   const activeClass = useMemo(
     () => 'rounded-lg px-3 py-2 text-sm font-medium bg-slate-800 text-white',
@@ -49,12 +51,18 @@ export function AppLayout() {
             <div className="text-xs text-slate-400">Admin panel</div>
           </div>
           <div className="flex items-center gap-3">
-            {email ? <div className="text-xs text-slate-300">{email}</div> : null}
+            {offline ? (
+              <div className="text-xs text-amber-200/90">Offline mode (no Supabase)</div>
+            ) : email ? (
+              <div className="text-xs text-slate-300">{email}</div>
+            ) : null}
             <button
               className="rounded-lg bg-slate-800 px-3 py-2 text-xs font-medium hover:bg-slate-700"
               onClick={async () => {
-                await supabase.auth.signOut();
+                if (offline) return;
+                await supabase!.auth.signOut();
               }}
+              disabled={offline}
             >
               Sign out
             </button>

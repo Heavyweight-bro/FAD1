@@ -4,3 +4,7 @@ export function requireEnv(name: string): string {
   return value;
 }
 
+export function getEnv(name: string): string | undefined {
+  return import.meta.env[name as keyof ImportMetaEnv] as unknown as string | undefined;
+}
+
