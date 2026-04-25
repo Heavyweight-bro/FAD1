@@ -1,4 +1,4 @@
-# Документація: Invoice Template Engine
+# Документація: Invoice Template Engine (UA)
 
 Короткий overview того, як зібраний додаток за `INVOICE_TEMPLATE_ENGINE_SPEC.md`.
 
@@ -40,7 +40,10 @@ Edge Function `api` приймає запити на шляхи:
 
 - **1C**
   - `POST /api/invoices/generate` з `Authorization: Bearer ite_...`
-  - На цьому етапі повертає `rendered_html` + створює рядок у `generated_invoices`. PDF-генерацію підключимо наступним кроком через remote Chromium (Browserless), бо Edge runtime не має Chromium.
+  - Повертає `rendered_html` і (після підключення PDF) має повертати `pdf_url`.
+
+- **AI (Gemini)**
+  - `POST /api/generate-template` (JWT) — приймає зображення першої сторінки інвойсу і повертає `html_template` (Handlebars + A4 CSS).
 
 ## 3) Налаштування Supabase
 
@@ -51,8 +54,11 @@ Edge Function `api` приймає запити на шляхи:
    - `generated`
    - (опційно) `originals`
 4. Встанови secrets для Edge Functions:
-   - `SUPABASE_URL`
-   - `SUPABASE_SERVICE_ROLE_KEY`
+   - `SUPABASE_URL` (наприклад `https://qszrdfiukvfmpmxtaznw.supabase.co`)
+   - `SUPABASE_SERVICE_ROLE_KEY` (service role key з Supabase)
+   - `GOOGLE_AI_API_KEY` (для Gemini template generation)
+   - (опційно) `OPENAI_API_KEY` (для asset extraction у наступних етапах)
+   - (опційно) `BROWSERLESS_WSS_URL` (для PDF генерації через remote Chromium)
 
 ## 4) Налаштування Vercel
 
@@ -61,6 +67,7 @@ Edge Function `api` приймає запити на шляхи:
 Env vars (Vercel):
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
+- (опційно) `VITE_API_BASE_URL` — якщо хочеш явно задати базу для Edge Function (інакше визначається з `VITE_SUPABASE_URL`)
 
 ## 5) Локальний запуск
 
@@ -68,4 +75,14 @@ Env vars (Vercel):
 npm install
 npm run dev:web
 ```
+
+## 6) Як протестувати флоу (end-to-end)
+
+1) **Створи admin користувача** в Supabase → Authentication → Users.
+2) У web зайди на `/login` і залогінься.
+3) На сторінці **Постачальники** додай постачальника.
+4) На сторінці **Шаблони**:
+   - завантаж PDF (локально)
+   - натисни **AI: згенерувати HTML** (потрібен `GOOGLE_AI_API_KEY` в Supabase Secrets)
+   - натисни **Згенерувати превʼю** і перевір рендер.
 
