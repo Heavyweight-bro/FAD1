@@ -7,6 +7,9 @@ function apiBaseUrl(): string {
   const explicit = getEnv('VITE_API_BASE_URL');
   if (explicit) return explicit.replace(/\/+$/, '');
 
+  // In production on Vercel, prefer same-origin Vercel Functions (/api/*).
+  if (import.meta.env.PROD) return '';
+
   // Default to Supabase functions domain derived from VITE_SUPABASE_URL
   const url = getEnv('VITE_SUPABASE_URL');
   if (!url) throw new Error('Missing env var: VITE_API_BASE_URL (or VITE_SUPABASE_URL)');
