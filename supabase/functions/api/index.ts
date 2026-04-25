@@ -10,6 +10,17 @@ import { randomKey, sha256Hex } from '../_shared/crypto.ts';
 
 type RouteMatch = { ok: true; params: Record<string, string> } | { ok: false };
 
+async function requireAdminUser(req: Request) {
+  const auth = req.headers.get('authorization') || '';
+  const jwt = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
+  if (!jwt) return { ok: false as const, error: 'Missing Authorization bearer JWT' };
+
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase.auth.getUser(jwt);
+  if (error || !data?.user) return { ok: false as const, error: 'Invalid JWT' };
+  return { ok: true as const, user: data.user };
+}
+
 function match(pattern: string, pathname: string): RouteMatch {
   const p = pattern.split('/').filter(Boolean);
   const a = pathname.split('/').filter(Boolean);
@@ -104,6 +115,12 @@ Deno.serve(async (req) => {
       if (invErr) throw invErr;
 
       return ok({ invoice_id: invoiceRow.id, pdf_url: null, rendered_html: html }, 200);
+    }
+
+    // All other endpoints require Supabase Auth (admin panel)
+    {
+      const authz = await requireAdminUser(req);
+      if (!authz.ok) return badRequest(authz.error, 401);
     }
 
     // =========================
