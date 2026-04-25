@@ -7,6 +7,7 @@ import type { FieldCategory, FieldMapping } from '../offline/types';
 import { apiFetch } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import { pdfFirstPageToPngBase64 } from '../lib/pdf';
+import { cropPngBase64FromImageBase64 } from '../lib/image';
 
 const CATEGORIES: Array<{ id: FieldCategory; label: string }> = [
   { id: 'buyer', label: 'Покупець' },
@@ -42,6 +43,10 @@ export function TemplatesPage() {
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiNote, setAiNote] = useState<string>('');
+  const [pageImage, setPageImage] = useState<{ base64: string; mimeType: string } | null>(null);
+  const [analysis, setAnalysis] = useState<any | null>(null);
+  const [logo, setLogo] = useState<{ base64: string; mimeType: string } | null>(null);
+  const [stamp, setStamp] = useState<{ base64: string; mimeType: string } | null>(null);
 
   const supplierName = useMemo(() => {
     if (!selected) return '';
@@ -52,25 +57,84 @@ export function TemplatesPage() {
     if (!selected) return;
     const url = URL.createObjectURL(file);
     updateTemplateOriginalPdf(selected.id, { name: file.name, url });
+    setAiError(null);
+    setAiNote('');
+    setAnalysis(null);
+    setLogo(null);
+    setStamp(null);
+    try {
+      const img = await pdfFirstPageToPngBase64(file);
+      setPageImage(img);
+    } catch (e) {
+      setPageImage(null);
+      setAiError(e instanceof Error ? e.message : 'Не вдалось конвертувати PDF у зображення');
+    }
   }
 
-  async function generateFromPdf(file: File) {
+  async function analyzeInvoice() {
     if (!selected) return;
     if (!online) {
       setAiError('AI генерація доступна в онлайн-режимі (Supabase + Edge Function).');
+      return;
+    }
+    if (!pageImage) {
+      setAiError('Спочатку завантаж PDF.');
       return;
     }
     setAiError(null);
     setAiNote('');
     setAiBusy(true);
     try {
-      const { base64, mimeType } = await pdfFirstPageToPngBase64(file);
+      const res = await apiFetch<{ success: true; analysis: any }>(`/api/analyze`, {
+        method: 'POST',
+        body: JSON.stringify({
+          image_base64: pageImage.base64,
+          mime_type: pageImage.mimeType,
+        }),
+      });
+      setAnalysis(res.analysis);
+      setAiNote('Аналіз готовий. Далі — витягни лого/печатку і згенеруй HTML.');
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : 'AI generation failed');
+    } finally {
+      setAiBusy(false);
+    }
+  }
+
+  async function extractAssetsFromAnalysis() {
+    if (!pageImage || !analysis) return;
+    setAiError(null);
+    try {
+      if (analysis?.logoPosition) {
+        const cropped = await cropPngBase64FromImageBase64(pageImage, analysis.logoPosition);
+        setLogo(cropped);
+      }
+      if (analysis?.stampPosition) {
+        const cropped = await cropPngBase64FromImageBase64(pageImage, analysis.stampPosition);
+        setStamp(cropped);
+      }
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : 'Не вдалось витягнути ассети');
+    }
+  }
+
+  async function generateTemplateFromImage() {
+    if (!selected) return;
+    if (!online) {
+      setAiError('AI генерація доступна в онлайн-режимі (Supabase + Edge Function).');
+      return;
+    }
+    if (!pageImage) return setAiError('Спочатку завантаж PDF.');
+    setAiError(null);
+    setAiNote('');
+    setAiBusy(true);
+    try {
       const res = await apiFetch<{ success: true; html_template: string; note?: string }>(`/api/generate-template`, {
         method: 'POST',
         body: JSON.stringify({
           supplier_id: selected.supplier_id,
-          image_base64: base64,
-          mime_type: mimeType,
+          image_base64: pageImage.base64,
+          mime_type: pageImage.mimeType,
         }),
       });
       updateTemplate(selected.id, { html_template: res.html_template });
@@ -161,7 +225,12 @@ export function TemplatesPage() {
 
       <div className="grid gap-4 lg:grid-cols-12">
         <section className="lg:col-span-4 rounded-2xl border border-slate-800 bg-slate-950/30 p-4">
-          <div className="text-sm font-semibold">1) Завантаж оригінальний PDF</div>
+          <div className="text-sm font-semibold">Майстер шаблону (Flow 1)</div>
+          <div className="mt-2 text-xs text-slate-400">
+            1) PDF → 2) Аналіз → 3) Лого/печатка → 4) HTML шаблон → 5) Превʼю
+          </div>
+
+          <div className="mt-4 text-sm font-semibold">1) Завантаж оригінальний PDF</div>
           <div className="mt-2 flex items-center gap-2">
             <input
               type="file"
@@ -173,21 +242,55 @@ export function TemplatesPage() {
               className="block w-full text-xs text-slate-300 file:mr-3 file:rounded-lg file:border file:border-slate-700 file:bg-slate-900 file:px-3 file:py-2 file:text-xs file:text-slate-100 hover:file:bg-slate-800"
             />
           </div>
+
+          <div className="mt-4 text-sm font-semibold">2) Проаналізувати (AI)</div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button
+              className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold hover:bg-indigo-500 disabled:opacity-60"
+              disabled={!pageImage || aiBusy}
+              onClick={analyzeInvoice}
+              title={online ? 'Gemini визначить позиції лого/печатки' : 'Потрібен онлайн режим'}
+            >
+              {aiBusy ? 'Аналізую…' : 'AI: аналіз PDF'}
+            </button>
+            <button
+              className="rounded-lg bg-slate-800 px-3 py-2 text-xs font-semibold hover:bg-slate-700 disabled:opacity-60"
+              disabled={!analysis}
+              onClick={() => void extractAssetsFromAnalysis()}
+            >
+              Витягти лого/печатку
+            </button>
+          </div>
+
+          <div className="mt-4 text-sm font-semibold">3) Перевірити ассети</div>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <div className="rounded-xl border border-slate-800 bg-slate-950 p-2">
+              <div className="text-[11px] text-slate-400">Лого</div>
+              {logo ? (
+                <img className="mt-2 max-h-24 w-full object-contain bg-white rounded" src={`data:${logo.mimeType};base64,${logo.base64}`} />
+              ) : (
+                <div className="mt-2 text-[11px] text-slate-500">Нема</div>
+              )}
+            </div>
+            <div className="rounded-xl border border-slate-800 bg-slate-950 p-2">
+              <div className="text-[11px] text-slate-400">Печатка</div>
+              {stamp ? (
+                <img className="mt-2 max-h-24 w-full object-contain bg-white rounded" src={`data:${stamp.mimeType};base64,${stamp.base64}`} />
+              ) : (
+                <div className="mt-2 text-[11px] text-slate-500">Нема</div>
+              )}
+            </div>
+          </div>
+          <div className="mt-2 text-[11px] text-slate-400">
+            Примітка: зараз це “кроп по позиціях”. Фон може залишатись. Для 1:1 “без фону” додамо окремий крок background removal (як у SPEC з GPT-4o).
+          </div>
+
+          <div className="mt-4 text-sm font-semibold">4) Згенерувати HTML шаблон (AI)</div>
           <div className="mt-2 flex gap-2">
             <button
               className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold hover:bg-indigo-500 disabled:opacity-60"
-              disabled={!selected.original_pdf_url || aiBusy}
-              onClick={async () => {
-                const input = document.createElement('input');
-                input.type = 'file';
-                input.accept = 'application/pdf';
-                input.onchange = () => {
-                  const f = input.files?.[0];
-                  if (f) void generateFromPdf(f);
-                };
-                input.click();
-              }}
-              title={online ? 'Згенерувати HTML через Gemini' : 'Потрібен онлайн режим'}
+              disabled={!pageImage || aiBusy}
+              onClick={generateTemplateFromImage}
             >
               {aiBusy ? 'Генерую…' : 'AI: згенерувати HTML'}
             </button>
