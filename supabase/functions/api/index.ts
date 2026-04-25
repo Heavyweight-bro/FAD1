@@ -7,6 +7,7 @@ import { verify1cApiKey } from '../_shared/api-key.ts';
 import { DEFAULT_MAPPINGS } from '../_shared/default-mappings.ts';
 import { FieldTransformService } from '../_shared/transform.ts';
 import { randomKey, sha256Hex } from '../_shared/crypto.ts';
+import { GoogleGenerativeAI } from 'npm:@google/generative-ai@0.21.0';
 
 type RouteMatch = { ok: true; params: Record<string, string> } | { ok: false };
 
@@ -115,6 +116,34 @@ Deno.serve(async (req) => {
       if (invErr) throw invErr;
 
       return ok({ invoice_id: invoiceRow.id, pdf_url: null, rendered_html: html }, 200);
+    }
+
+    // =========================
+    // AI: Generate template (Gemini)
+    // =========================
+    if (pathname === '/api/generate-template' && req.method === 'POST') {
+      const authz = await requireAdminUser(req);
+      if (!authz.ok) return badRequest(authz.error, 401);
+
+      const body = await readJson<{ supplier_id: string; image_base64: string; mime_type: string }>(req);
+      if (!body?.image_base64 || !body?.mime_type) return badRequest('image_base64 and mime_type required');
+
+      const apiKey = Deno.env.get('GOOGLE_AI_API_KEY');
+      if (!apiKey) return badRequest('Missing GOOGLE_AI_API_KEY secret', 500);
+
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
+      const prompt = `Generate an HTML invoice template that replicates the layout and styling.\n\nREQUIREMENTS:\n1. Use Handlebars variables: {{variable_name}}\n2. Items array: {{#each items}}...{{/each}}\n3. Include inline CSS in <style>\n4. A4 print: @page size A4 margin 10mm; body width 190mm\n5. Tables must use table-layout: fixed\n6. Font sizes: 8-10px; tables 7-8px\n\nSTANDARD VARIABLES:\n- Buyer: {{buyer_name}}, {{buyer_address}}, {{buyer_vat}}, {{buyer_phone}}, {{buyer_email}}\n- Seller: {{seller_name}}, {{seller_address}}\n- Bank: {{beneficiary_name}}, {{account_number}}, {{bank_name}}, {{swift_code}}, {{bank_address}}\n- Document: {{invoice_number}}, {{invoice_date}}, {{total_amount}}, {{currency}}, {{payment_terms}}\n- Delivery: {{delivery_term}}, {{delivery_place}}, {{port_of_loading}}, {{port_of_discharge}}, {{bl_number}}, {{container_number}}\n- Items: {{#each items}}{{this.number}}, {{this.description}}, {{this.quantity}}, {{this.unit_price}}, {{this.amount}}{{/each}}\n\nReturn ONLY the complete HTML starting with <!DOCTYPE html>. No markdown.`;
+
+      const result = await model.generateContent([
+        prompt,
+        { inlineData: { mimeType: body.mime_type, data: body.image_base64 } },
+      ]);
+      let html = result.response.text().trim();
+      html = html.replace(/```html\\n?|\\n?```/g, '').trim();
+      if (!html.toLowerCase().startsWith('<!doctype')) return badRequest('Gemini returned invalid HTML', 500);
+      return ok({ html_template: html, note: 'Gemini: згенеровано HTML з першої сторінки PDF.' });
     }
 
     // All other endpoints require Supabase Auth (admin panel)
