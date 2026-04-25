@@ -121,6 +121,36 @@ Deno.serve(async (req) => {
     // =========================
     // AI: Generate template (Gemini)
     // =========================
+    if (pathname === '/api/analyze' && req.method === 'POST') {
+      const authz = await requireAdminUser(req);
+      if (!authz.ok) return badRequest(authz.error, 401);
+
+      const body = await readJson<{ image_base64: string; mime_type: string }>(req);
+      if (!body?.image_base64 || !body?.mime_type) return badRequest('image_base64 and mime_type required');
+
+      const apiKey = Deno.env.get('GOOGLE_AI_API_KEY');
+      if (!apiKey) return badRequest('Missing GOOGLE_AI_API_KEY secret', 500);
+
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
+      const prompt = `Analyze this invoice image and return ONLY valid JSON with:\n\n{\n  \"documentType\": \"invoice\"|\"proforma\"|\"commercial_invoice\",\n  \"hasLogo\": boolean,\n  \"logoPosition\": {\"x\": number, \"y\": number, \"width\": number, \"height\": number} | null,\n  \"hasStamp\": boolean,\n  \"stampPosition\": {\"x\": number, \"y\": number, \"width\": number, \"height\": number} | null,\n  \"hasSignature\": boolean,\n  \"signaturePosition\": {\"x\": number, \"y\": number, \"width\": number, \"height\": number} | null,\n  \"tableColumns\": string[],\n  \"sections\": string[]\n}\n\nAll positions are percentages (0..100). No markdown, no explanation.`;
+
+      const result = await model.generateContent([
+        prompt,
+        { inlineData: { mimeType: body.mime_type, data: body.image_base64 } },
+      ]);
+
+      const text = result.response.text().trim().replace(/```json\\n?|\\n?```/g, '');
+      let analysis: unknown;
+      try {
+        analysis = JSON.parse(text);
+      } catch {
+        return badRequest('Gemini returned invalid JSON', 500);
+      }
+      return ok({ analysis });
+    }
+
     if (pathname === '/api/generate-template' && req.method === 'POST') {
       const authz = await requireAdminUser(req);
       if (!authz.ok) return badRequest(authz.error, 401);
