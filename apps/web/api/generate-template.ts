@@ -1,5 +1,4 @@
 import { readJson, requireUser, safe, sendJson } from './_shared';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 
 export const config = { runtime: 'nodejs' };
 
@@ -15,6 +14,7 @@ export default async function handler(req: any, res: any): Promise<void> {
     const apiKey = process.env.GOOGLE_AI_API_KEY;
     if (!apiKey) return sendJson(res, { success: false, error: 'Missing GOOGLE_AI_API_KEY' }, 500);
 
+    const { GoogleGenerativeAI } = await import('@google/generative-ai');
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
