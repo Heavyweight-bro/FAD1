@@ -1,19 +1,19 @@
-import { json, readJson, requireUser, safe } from './_shared';
+import { readJson, requireUser, safe, sendJson } from './_shared';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 export const config = { runtime: 'nodejs' };
 
-export default async function handler(req: Request): Promise<Response> {
-  return safe(async () => {
-    if (req.method !== 'POST') return json({ success: false, error: 'Method not allowed' }, 405);
+export default async function handler(req: any, res: any): Promise<void> {
+  return safe(req, res, async () => {
+    if (req.method !== 'POST') return sendJson(res, { success: false, error: 'Method not allowed' }, 405);
     const authz = await requireUser(req);
-    if (!authz.ok) return json({ success: false, error: authz.error }, 401);
+    if (!authz.ok) return sendJson(res, { success: false, error: authz.error }, 401);
 
     const body = await readJson<{ image_base64: string; mime_type: string }>(req);
-    if (!body?.image_base64 || !body?.mime_type) return json({ success: false, error: 'image_base64 and mime_type required' }, 400);
+    if (!body?.image_base64 || !body?.mime_type) return sendJson(res, { success: false, error: 'image_base64 and mime_type required' }, 400);
 
     const apiKey = process.env.GOOGLE_AI_API_KEY;
-    if (!apiKey) return json({ success: false, error: 'Missing GOOGLE_AI_API_KEY' }, 500);
+    if (!apiKey) return sendJson(res, { success: false, error: 'Missing GOOGLE_AI_API_KEY' }, 500);
 
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
@@ -42,9 +42,9 @@ All positions are percentages (0..100). No markdown, no explanation.`;
     const text = result.response.text().trim().replace(/```json\n?|\n?```/g, '');
     try {
       const analysis = JSON.parse(text);
-      return json({ success: true, analysis });
+      return sendJson(res, { success: true, analysis });
     } catch {
-      return json({ success: false, error: 'Gemini returned invalid JSON' }, 500);
+      return sendJson(res, { success: false, error: 'Gemini returned invalid JSON' }, 500);
     }
   });
 }

@@ -1,10 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 
-export function json(res: any, status = 200) {
-  return new Response(JSON.stringify(res), {
-    status,
-    headers: { 'content-type': 'application/json; charset=utf-8' },
-  });
+export function sendJson(res: any, payload: any, status = 200) {
+  res.statusCode = status;
+  res.setHeader('content-type', 'application/json; charset=utf-8');
+  res.end(JSON.stringify(payload));
 }
 
 export function env(name: string) {
@@ -25,17 +24,17 @@ export function supabaseAdmin() {
   });
 }
 
-export async function safe<T>(fn: () => Promise<Response>): Promise<Response> {
+export async function safe(req: any, res: any, fn: () => Promise<void>): Promise<void> {
   try {
-    return await fn();
+    await fn();
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Unknown error';
-    return json({ success: false, error: message }, 500);
+    sendJson(res, { success: false, error: message }, 500);
   }
 }
 
-export async function requireUser(req: Request) {
-  const auth = req.headers.get('authorization') || '';
+export async function requireUser(req: any) {
+  const auth = (req.headers?.authorization || req.headers?.Authorization || '') as string;
   const token = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
   if (!token) return { ok: false as const, error: 'Missing Authorization bearer JWT' };
   const sb = supabaseAdmin();
@@ -44,9 +43,13 @@ export async function requireUser(req: Request) {
   return { ok: true as const, user: data.user };
 }
 
-export async function readJson<T>(req: Request): Promise<T> {
+export async function readJson<T>(req: any): Promise<T> {
+  if (req.body && typeof req.body === 'object') return req.body as T;
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of req) chunks.push(chunk);
+  const text = new TextDecoder().decode(Buffer.concat(chunks as any));
   try {
-    return (await req.json()) as T;
+    return JSON.parse(text || '{}') as T;
   } catch {
     throw new Error('Invalid JSON body');
   }
