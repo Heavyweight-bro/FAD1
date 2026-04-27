@@ -10,7 +10,7 @@ export default async function handler(req: any, res: any): Promise<void> {
     const id = (req.query?.id ?? '') as string;
     if (!id) return sendJson(res, { success: false, error: 'id required' }, 400);
 
-    const sb = supabaseAdmin();
+    const sb = await supabaseAdmin();
 
     if (req.method === 'GET') {
       const { data, error } = await sb

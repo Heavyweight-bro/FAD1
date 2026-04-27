@@ -9,7 +9,7 @@ export default async function handler(req: any, res: any): Promise<void> {
     const authz = await requireUser(req);
     if (!authz.ok) return sendJson(res, { success: false, error: authz.error }, 401);
 
-    const sb = supabaseAdmin();
+    const sb = await supabaseAdmin();
 
     if (req.method === 'GET') {
       const search = (req.query?.search ?? '') as string;
