@@ -1,4 +1,4 @@
-import { readJson, requireUser, safe, sendJson, supabaseAdmin } from '../_shared';
+import { readJson, requireUser, safe, sendJson, supabaseRest } from '../_shared';
 
 export const config = { runtime: 'nodejs' };
 
@@ -10,28 +10,25 @@ export default async function handler(req: any, res: any): Promise<void> {
     const id = (req.query?.id ?? '') as string;
     if (!id) return sendJson(res, { success: false, error: 'id required' }, 400);
 
-    const sb = await supabaseAdmin();
-
     if (req.method === 'GET') {
-      const { data, error } = await sb
-        .from('suppliers')
-        .select('*, invoice_templates(*), template_assets(*)')
-        .eq('id', id)
-        .single();
-      if (error) return sendJson(res, { success: false, error: error.message }, 500);
-      return sendJson(res, { success: true, data });
+      const r = await supabaseRest<any[]>(`/suppliers?select=*,invoice_templates(*),template_assets(*)&id=eq.${encodeURIComponent(id)}`);
+      if (!r.ok) return sendJson(res, { success: false, error: r.error }, 500);
+      return sendJson(res, { success: true, data: r.data[0] ?? null });
     }
 
     if (req.method === 'PUT') {
       const body = await readJson<Record<string, unknown>>(req);
-      const { data, error } = await sb.from('suppliers').update(body).eq('id', id).select().single();
-      if (error) return sendJson(res, { success: false, error: error.message }, 500);
-      return sendJson(res, { success: true, data });
+      const r = await supabaseRest<any[]>(`/suppliers?id=eq.${encodeURIComponent(id)}&select=*`, {
+        method: 'PATCH',
+        body,
+      });
+      if (!r.ok) return sendJson(res, { success: false, error: r.error }, 500);
+      return sendJson(res, { success: true, data: r.data[0] ?? null });
     }
 
     if (req.method === 'DELETE') {
-      const { error } = await sb.from('suppliers').delete().eq('id', id);
-      if (error) return sendJson(res, { success: false, error: error.message }, 500);
+      const r = await supabaseRest<unknown>(`/suppliers?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!r.ok) return sendJson(res, { success: false, error: r.error }, 500);
       return sendJson(res, { success: true });
     }
 
