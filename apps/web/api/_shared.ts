@@ -14,10 +14,24 @@ export function env(name: string) {
 }
 
 export function supabaseAdmin() {
-  return createClient(env('SUPABASE_URL'), env('SUPABASE_SERVICE_ROLE_KEY'), {
+  const url = env('SUPABASE_URL');
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_SERVICE_KEY;
+  if (!serviceKey) {
+    throw new Error('Missing env var: SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SERVICE_ROLE / SUPABASE_SERVICE_KEY)');
+  }
+  return createClient(url, serviceKey, {
     auth: { persistSession: false },
     global: { headers: { 'X-Client-Info': 'ite-vercel' } },
   });
+}
+
+export async function safe<T>(fn: () => Promise<Response>): Promise<Response> {
+  try {
+    return await fn();
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Unknown error';
+    return json({ success: false, error: message }, 500);
+  }
 }
 
 export async function requireUser(req: Request) {

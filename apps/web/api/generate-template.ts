@@ -1,23 +1,24 @@
-import { json, readJson, requireUser } from './_shared';
+import { json, readJson, requireUser, safe } from './_shared';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 export const config = { runtime: 'nodejs' };
 
 export default async function handler(req: Request): Promise<Response> {
-  if (req.method !== 'POST') return json({ success: false, error: 'Method not allowed' }, 405);
-  const authz = await requireUser(req);
-  if (!authz.ok) return json({ success: false, error: authz.error }, 401);
+  return safe(async () => {
+    if (req.method !== 'POST') return json({ success: false, error: 'Method not allowed' }, 405);
+    const authz = await requireUser(req);
+    if (!authz.ok) return json({ success: false, error: authz.error }, 401);
 
-  const body = await readJson<{ supplier_id?: string; image_base64: string; mime_type: string }>(req);
-  if (!body?.image_base64 || !body?.mime_type) return json({ success: false, error: 'image_base64 and mime_type required' }, 400);
+    const body = await readJson<{ supplier_id?: string; image_base64: string; mime_type: string }>(req);
+    if (!body?.image_base64 || !body?.mime_type) return json({ success: false, error: 'image_base64 and mime_type required' }, 400);
 
-  const apiKey = process.env.GOOGLE_AI_API_KEY;
-  if (!apiKey) return json({ success: false, error: 'Missing GOOGLE_AI_API_KEY' }, 500);
+    const apiKey = process.env.GOOGLE_AI_API_KEY;
+    if (!apiKey) return json({ success: false, error: 'Missing GOOGLE_AI_API_KEY' }, 500);
 
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
-  const prompt = `Generate an HTML invoice template that replicates the layout and styling.
+    const prompt = `Generate an HTML invoice template that replicates the layout and styling.
 
 REQUIREMENTS:
 1. Use Handlebars variables: {{variable_name}}
@@ -37,14 +38,15 @@ STANDARD VARIABLES:
 
 Return ONLY the complete HTML starting with <!DOCTYPE html>. No markdown.`;
 
-  const result = await model.generateContent([
-    prompt,
-    { inlineData: { mimeType: body.mime_type, data: body.image_base64 } },
-  ]);
+    const result = await model.generateContent([
+      prompt,
+      { inlineData: { mimeType: body.mime_type, data: body.image_base64 } },
+    ]);
 
-  let html = result.response.text().trim();
-  html = html.replace(/```html\n?|\n?```/g, '').trim();
-  if (!html.toLowerCase().startsWith('<!doctype')) return json({ success: false, error: 'Gemini returned invalid HTML' }, 500);
-  return json({ success: true, html_template: html });
+    let html = result.response.text().trim();
+    html = html.replace(/```html\n?|\n?```/g, '').trim();
+    if (!html.toLowerCase().startsWith('<!doctype')) return json({ success: false, error: 'Gemini returned invalid HTML' }, 500);
+    return json({ success: true, html_template: html });
+  });
 }
 
